@@ -41,10 +41,11 @@ else
             ;;
     esac
 
+    # 抢救源使用 http，防止因系统缺少 ca-certificates 导致 https 握手失败
     cat > /etc/apt/sources.list <<EOF
-deb https://deb.debian.org/debian ${CODENAME} main contrib non-free ${EXTRA}
-deb https://deb.debian.org/debian ${CODENAME}-updates main contrib non-free ${EXTRA}
-deb https://security.debian.org/debian-security ${CODENAME}-security main contrib non-free ${EXTRA}
+deb http://deb.debian.org/debian ${CODENAME} main contrib non-free ${EXTRA}
+deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free ${EXTRA}
+deb http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free ${EXTRA}
 EOF
 
     apt-get update -y
@@ -52,7 +53,6 @@ fi
 
 # 2. 系统升级
 echo "-> 升级系统..."
-
 apt-get \
     -o Dpkg::Options::="--force-confdef" \
     -o Dpkg::Options::="--force-confold" \
@@ -60,16 +60,21 @@ apt-get \
 
 # 3. DNS
 echo "-> 配置 DNS..."
-
+# 如果是软链接则直接解除，确保自定义 DNS 写入并生效
 if [ -L /etc/resolv.conf ]; then
-    echo "检测到系统管理的 resolv.conf，跳过 DNS 修改"
-else
+    echo "解除系统默认的 resolv.conf 软链接..."
+    rm -f /etc/resolv.conf
+fi
+
+if [ -w /etc/resolv.conf ] || [ ! -e /etc/resolv.conf ]; then
     cat > /etc/resolv.conf <<EOF
 nameserver 1.1.1.1
 nameserver 8.8.8.8
 nameserver 2606:4700:4700::1111
 nameserver 2001:4860:4860::8888
 EOF
+else
+    echo "警告：/etc/resolv.conf 不可写，跳过 DNS 设置"
 fi
 
 # 4. 时区
@@ -82,7 +87,6 @@ timedatectl set-ntp true
 
 # 6. 常用工具
 echo "-> 安装常用工具..."
-
 apt-get install -y \
     curl \
     wget \
@@ -91,14 +95,12 @@ apt-get install -y \
 
 # 7. IPv4 优先
 echo "-> 配置 IPv4 优先..."
-
 if ! grep -q "^precedence ::ffff:0:0/96  100" /etc/gai.conf 2>/dev/null; then
     echo "precedence ::ffff:0:0/96  100" >> /etc/gai.conf
 fi
 
 # 8. BBR
 echo "-> 配置 BBR..."
-
 cat > /etc/sysctl.d/99-bbr.conf <<EOF
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
@@ -107,7 +109,6 @@ EOF
 sysctl --system >/dev/null
 
 CURRENT_CC=$(sysctl -n net.ipv4.tcp_congestion_control)
-
 if [ "$CURRENT_CC" = "bbr" ]; then
     echo "BBR 已启用"
 else
@@ -116,7 +117,6 @@ fi
 
 # 9. UFW
 echo "-> 安装并配置 UFW..."
-
 apt-get install -y ufw
 
 if command -v sshd >/dev/null 2>&1; then
@@ -126,7 +126,6 @@ else
 fi
 
 [ -n "$SSH_PORT" ] || SSH_PORT=22
-
 echo "检测到 SSH 端口：$SSH_PORT"
 
 ufw default deny incoming
@@ -140,7 +139,6 @@ ufw --force enable
 
 # 10. Fail2ban
 echo "-> 安装并配置 Fail2ban..."
-
 apt-get install -y fail2ban
 
 cat > /etc/fail2ban/jail.local <<EOF
@@ -161,7 +159,6 @@ systemctl restart fail2ban
 
 # 11. 清理
 echo "-> 清理系统..."
-
 apt-get autoremove -y
 apt-get clean
 
@@ -170,19 +167,14 @@ echo
 echo "========== 初始化完成 =========="
 echo "SSH 端口：${SSH_PORT}"
 echo
-
 echo "UFW 状态："
 ufw status
-
 echo
 echo "Fail2ban 状态："
 systemctl is-active fail2ban
-
 echo
 echo "BBR 状态："
 sysctl net.ipv4.tcp_congestion_control
-
 echo
 echo "建议执行："
 echo "reboot"
-echo
