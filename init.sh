@@ -14,41 +14,43 @@ fi
 
 echo "========== 开始执行初始化脚本 =========="
 
-# 0. 自动检测系统版本并修复重写官方 APT 源（解决云厂商镜像自带错源引发的 404 问题）
-echo "-> 检查并修复系统软件源..."
-if [ -f /etc/os-release ]; then
-    . /etc/os-release
-    CODENAME="${VERSION_CODENAME:-}"
+# 1. 智能测试并更新系统
+echo "-> 测试当前软件源并更新系统..."
+# 利用 if 语句的特性：如果 apt-get update 失败，不会触发 set -e 导致脚本直接退出
+if apt-get update -y; then
+    echo "软件源状态正常，继续系统升级..."
 else
-    CODENAME=""
-fi
-
-if [ -z "$CODENAME" ]; then
-    CODENAME=$(lsb_release -cs 2>/dev/null || echo "bookworm")
-fi
-
-if [ "$CODENAME" = "bullseye" ] || [ "$CODENAME" = "bookworm" ] || [ "$CODENAME" = "trixie" ]; then
-    echo "检测到 Debian 代号: $CODENAME，正在重写为官方纯净标准源..."
-    [ -f /etc/apt/sources.list ] && cp /etc/apt/sources.list /etc/apt/sources.list.bak
+    echo "检测到软件源失效 (如 404 错误)，正在自动重写为官方纯净标准源..."
     
-    # Debian 12 (bookworm) 及以上版本引入了 non-free-firmware
-    FIRMWARE=""
-    if [ "$CODENAME" != "bullseye" ]; then
-        FIRMWARE="non-free-firmware"
+    # 提取系统代号
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        CODENAME="${VERSION_CODENAME:-}"
+    else
+        CODENAME=$(lsb_release -cs 2>/dev/null || echo "")
     fi
 
-    cat > /etc/apt/sources.list <<EOF
+    if [ "$CODENAME" = "bullseye" ] || [ "$CODENAME" = "bookworm" ] || [ "$CODENAME" = "trixie" ]; then
+        FIRMWARE=""
+        if [ "$CODENAME" != "bullseye" ]; then
+            FIRMWARE="non-free-firmware"
+        fi
+        
+        # 直接覆盖写入，不再产生 .bak 垃圾文件
+        cat > /etc/apt/sources.list <<EOF
 deb http://deb.debian.org/debian ${CODENAME} main contrib non-free ${FIRMWARE}
 deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free ${FIRMWARE}
 deb http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free ${FIRMWARE}
 EOF
-else
-    echo "警告：未识别的 Debian 版本代号，保持原有软件源不变。"
+        echo "软件源修复完成，重新拉取更新..."
+        apt-get update -y
+    else
+        echo "错误：未能识别的 Debian 版本代号 ($CODENAME)，无法自动修复源！"
+        exit 1
+    fi
 fi
 
-# 1. 更新系统
-echo "-> 更新系统..."
-apt-get update -y
+# 执行系统升级
 apt-get -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \
         upgrade -y
@@ -56,7 +58,7 @@ apt-get -o Dpkg::Options::="--force-confdef" \
 # 2. 修改 DNS
 echo "-> 修改 DNS..."
 if [ -L /etc/resolv.conf ]; then
-    echo "检测到 /etc/resolv.conf 为符号链接，正在解除链接以防止重启后被覆盖..."
+    echo "检测到 /etc/resolv.conf 为符号链接，正在解除..."
     rm -f /etc/resolv.conf
 fi
 
@@ -153,7 +155,7 @@ EOF
 systemctl enable fail2ban
 systemctl restart fail2ban
 
-# 10. 清理系统
+# 10. 清理系统垃圾
 echo "-> 清理系统垃圾..."
 apt-get autoremove -y
 apt-get clean
