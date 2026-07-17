@@ -1,6 +1,6 @@
 #!/bin/bash
 # Debian 11/12/13 服务器基础环境一键初始化脚本
-# 功能：系统更新、时区设置（上海）、BBR、UFW、Fail2ban、自动清理等
+# 功能：系统更新、时区设置（上海）、BBR、UFW、自动清理等
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
@@ -24,7 +24,6 @@ else
     else
         CODENAME=""
     fi
-
     case "$CODENAME" in
         bullseye)
             EXTRA=""
@@ -37,11 +36,9 @@ else
             exit 1
             ;;
     esac
-
     # 备份而非删除（兼容 Debian 12/13 的 debian.sources）
     mv /etc/apt/sources.list.d/debian.sources \
        /etc/apt/sources.list.d/debian.sources.bak 2>/dev/null || true
-
     cat > /etc/apt/sources.list <<EOF
 deb http://deb.debian.org/debian ${CODENAME} main contrib non-free ${EXTRA}
 deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free ${EXTRA}
@@ -87,7 +84,6 @@ net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl -p /etc/sysctl.d/99-bbr.conf >/dev/null 2>&1 || true
-
 if sysctl -n net.ipv4.tcp_congestion_control | grep -q '^bbr$'; then
     echo "BBR 已成功启用"
 else
@@ -117,11 +113,9 @@ echo ""
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH (fallback)'
-
 if [ "$SSH_PORT" != "22" ]; then
     ufw allow ${SSH_PORT}/tcp comment 'SSH (detected)'
 fi
-
 ufw allow 80/tcp comment 'HTTP'
 ufw allow 443/tcp comment 'HTTPS'
 
@@ -132,31 +126,12 @@ echo ""
 echo "UFW 状态："
 ufw status
 
-# ==================== 9. Fail2ban ====================
-echo "-> 安装并配置 Fail2ban..."
-apt-get install -y fail2ban
-
-cat > /etc/fail2ban/jail.local <<EOF
-[DEFAULT]
-ignoreip = 127.0.0.1/8 ::1
-bantime = 7h
-findtime = 10m
-maxretry = 3
-[sshd]
-enabled = true
-backend = auto
-port = ${SSH_PORT}
-EOF
-
-systemctl enable fail2ban 2>/dev/null || true
-systemctl restart fail2ban 2>/dev/null || true
-
-# ==================== 10. 清理 ====================
+# ==================== 9. 清理 ====================
 echo "-> 清理系统..."
 apt-get autoremove -y
 apt-get clean
 
-# ==================== 11. 每周自动清理任务 ====================
+# ==================== 10. 每周自动清理任务 ====================
 echo "-> 配置每周日 07:07（上海时间）自动清理垃圾任务..."
 cat > /usr/local/bin/weekly-cleanup.sh <<'EOF'
 #!/bin/bash
@@ -177,16 +152,13 @@ systemctl enable cron 2>/dev/null || true
 systemctl restart cron 2>/dev/null || true
 echo "每周日 07:07（上海时间）自动清理任务已设置完成"
 
-# ==================== 12. 初始化完成 ====================
+# ==================== 11. 初始化完成 ====================
 echo
 echo "========== 初始化完成 =========="
 echo "SSH 端口（检测值）：${SSH_PORT}"
 echo
 echo "UFW 状态："
 ufw status
-echo
-echo "Fail2ban 状态："
-systemctl is-active fail2ban 2>/dev/null || echo "unknown"
 echo
 echo "BBR 状态："
 sysctl net.ipv4.tcp_congestion_control
